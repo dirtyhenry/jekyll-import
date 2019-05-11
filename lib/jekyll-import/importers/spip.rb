@@ -173,12 +173,30 @@ module JekyllImport
         db[posts_query].each do |post|
           process_post(post, db, options, page_name_list)
         end
+
+        assets_query = "
+           SELECT
+             id_document    AS `id`,
+             extension      AS `extension`,
+             fichier        AS `path`
+           FROM #{px}#{sx}documents"
+
+        File.open("asset_download_script.sh", "w") do |f|
+          f.puts "#!/usr/bin/env bash -x"
+          f.puts "\n"
+          f.puts "SITE_BASE_URL=TO_COMPLETE"
+          f.puts "\n"
+          f.puts "mkdir _assets"
+          db[assets_query].each do |asset|
+            f.puts "curl $SITE_BASE_URL/#{asset[:path]} -o _assets/#{asset[:id]}-#{File.basename(asset[:path])}"
+          end
+        end
       end
 
       def self.process_post(post, db, options, page_name_list)
-        if post[:id] == 54
-          puts "#{post}"
-        end
+        # if post[:id] == 54
+        #   puts "#{post}"
+        # end
 
         px = options[:table_prefix]
         sx = options[:site_prefix]
@@ -199,74 +217,74 @@ module JekyllImport
         categories = []
         tags = []
 
-        # if options[:categories] || options[:tags]
-        #   cquery =
-        #     "SELECT
-        #        terms.name AS `name`,
-        #        ttax.taxonomy AS `type`
-        #      FROM
-        #        #{px}#{sx}terms AS `terms`,
-        #        #{px}#{sx}term_relationships AS `trels`,
-        #        #{px}#{sx}term_taxonomy AS `ttax`
-        #      WHERE
-        #        trels.object_id = '#{post[:id]}' AND
-        #        trels.term_taxonomy_id = ttax.term_taxonomy_id AND
-        #        terms.term_id = ttax.term_id"
-        #
-        #   db[cquery].each do |term|
-        #     if options[:categories] && term[:type] == "category"
-        #       categories << if options[:clean_entities]
-        #                       clean_entities(term[:name])
-        #                     else
-        #                       term[:name]
-        #                     end
-        #     elsif options[:tags] && term[:type] == "post_tag"
-        #       tags << if options[:clean_entities]
-        #                 clean_entities(term[:name])
-        #               else
-        #                 term[:name]
-        #               end
-        #     end
-        #   end
-        # end
+        if options[:categories] || options[:tags]
+          cquery =
+            "SELECT
+               terms.titre AS `name`,
+               terms.type AS `type`
+             FROM
+               #{px}#{sx}mots AS `terms`,
+               #{px}#{sx}mots_liens AS `trels`
+             WHERE
+               trels.id_objet = '#{post[:id]}' AND
+               trels.id_mot = terms.id_mot"
+
+          db[cquery].each do |term|
+            if options[:categories]
+              new_category = options[:clean_entities] ? clean_entities(term[:type]) : term[:type]
+              unless categories.include? new_category
+                categories << new_category
+              end
+            end
+            if options[:tags]
+              new_tag = options[:clean_entities] ? clean_entities(term[:name]) : term[:name]
+              unless tags.include? new_tag
+                tags << new_tag
+              end
+            end
+          end
+        end
 
         comments = []
 
-        # if options[:comments] && post[:comment_count].to_i.positive?
-        #   cquery =
-        #     "SELECT
-        #        comment_ID           AS `id`,
-        #        comment_author       AS `author`,
-        #        comment_author_email AS `author_email`,
-        #        comment_author_url   AS `author_url`,
-        #        comment_date         AS `date`,
-        #        comment_date_gmt     AS `date_gmt`,
-        #        comment_content      AS `content`
-        #      FROM #{px}#{sx}comments
-        #      WHERE
-        #        comment_post_ID = '#{post[:id]}' AND
-        #        comment_approved != 'spam'"
-        #
-        #   db[cquery].each do |comment|
-        #     comcontent = comment[:content].to_s
-        #     comcontent.force_encoding("UTF-8") if comcontent.respond_to?(:force_encoding)
-        #     comcontent = clean_entities(comcontent) if options[:clean_entities]
-        #     comauthor = comment[:author].to_s
-        #     comauthor = clean_entities(comauthor) if options[:clean_entities]
-        #
-        #     comments << {
-        #       "id"           => comment[:id].to_i,
-        #       "author"       => comauthor,
-        #       "author_email" => comment[:author_email].to_s,
-        #       "author_url"   => comment[:author_url].to_s,
-        #       "date"         => comment[:date].to_s,
-        #       "date_gmt"     => comment[:date_gmt].to_s,
-        #       "content"      => comcontent,
-        #     }
-        #   end
-        #
-        #   comments.sort! { |a, b| a["id"] <=> b["id"] }
-        # end
+        if options[:comments]
+          cquery =
+            "SELECT
+               auteur         AS `author`,
+               email_auteur   AS `author_email`,
+               date_heure     AS `date`,
+               titre          AS `title`,
+               texte          AS `content`
+             FROM #{px}#{sx}forum
+             WHERE
+               id_objet = '#{post[:id]}' AND
+               statut = 'publie'"
+
+          db[cquery].each do |comment|
+            comcontenttitle = comment[:title].to_s
+            comcontenttitle.force_encoding("UTF-8") if comcontenttitle.respond_to?(:force_encoding)
+            comcontenttitle = clean_entities(comcontent) if options[:clean_entities]
+            comcontent = comment[:content].to_s
+            comcontent.force_encoding("UTF-8") if comcontent.respond_to?(:force_encoding)
+            comcontent = clean_entities(comcontent) if options[:clean_entities]
+            comauthor = comment[:author].to_s
+            comauthor = clean_entities(comauthor) if options[:clean_entities]
+
+            comments << {
+              "author"       => comauthor,
+              "author_email" => comment[:author_email].to_s,
+              "date"         => comment[:date].to_s,
+              "title"        => comcontenttitle,
+              "content"      => comcontent,
+            }
+          end
+
+          comments.sort! { |a, b| a["date"] <=> b["date"] }
+
+          if post[:id] == 1
+            puts "MICKDEBUG #{comments}"
+          end
+        end
 
         # Get the relevant fields as a hash, delete empty fields and
         # convert to YAML for the header.
